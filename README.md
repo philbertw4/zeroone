@@ -1,11 +1,11 @@
-##ZeroOne
+## ZeroOne
 ZeroOne is a very simple programming language inspired by the [theory of concatenative combinators](http://tunes.org/~iepos/joy.html).
 
-###Acknowledgements
+### Acknowledgements
 Special thanks to William Tanksley, Jr. for his patience and correspondence. Additional thanks to the
 contributors on the [concatenative mailing list.](https://groups.yahoo.com/neo/groups/concatenative/info). 
 
-###Why?
+### Why?
 In the language ZeroOne the following strings are valid programs: "1", "0", "10", "11", 
 "10001111010101010101010111101", "" (the empty string). Actually any string consisting of 1's and 0's is a
 valid program!
@@ -25,7 +25,7 @@ Example mapping (purely for illustration, the default mapping provided may be di
 
 TODO: add more documentation here
 
-###Building and Using
+### Building and Using
 
 This implementation of ZeroOne is written in Scala. 
 1. Install Scala's [Simple Build Tool](http://www.scala-sbt.org/0.13/docs/Setup.html)
@@ -44,5 +44,5 @@ Currently, an evaluated program will always return either:
 
 In the future, this evaluation mechanism will be replaced (hopefully) with a more pure exceptionless design
 
-##License
+### License
 This software is hereby released into the public domain. No warranties are expressed or implied.

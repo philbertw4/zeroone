@@ -3,6 +3,54 @@ package zeroone
 import org.scalatest.FunSuite
 import ZeroOne._
 
+class EvalSuite extends FunSuite {
+  import eval._
+  test("eval empty program should not change stack") {
+    assert(Program.empty.eval(Program.empty) == Program.empty)
+    assert(Program.empty.eval(Program(noop1,noop2,noop3)) == Program(noop1,noop2,noop3))
+  }
+  test("noop does not change the stack") {
+    assert(Program(noop1).eval(Program(noop2,noop3)) == Program(noop2,noop3))
+  }
+  test("nil pushes empty quotation on to stack") {
+    assert(Program(nil).eval(Program.empty) == Program(Quoted(Program.empty)))
+  }
+  test("sub program adds elements to parent") {
+    assert(Program(Quoted(noop1),Program(Quoted(noop2))) == Program(Quoted(noop1),Quoted(noop2)))
+  }
+  test("i executes top element") {
+    assert(Program(Quoted(noop1),Quoted(noop2),Quoted(zap),i).eval(Program.empty) == Program(Quoted(noop1)))
+  }
+  test("zap pops the top element") {
+    assert(Program(Quoted(noop1),zap).eval() == Program.empty)
+    assert(Program(Quoted(noop1),Quoted(noop2),Quoted(noop3),zap).eval() == Program(Quoted(noop1),Quoted(noop2)))
+  }
+  test("i zap") {
+    assert(Program(i,zap).eval() == Program(i,zap))
+    assert(Program(i,zap).eval(Program(Quoted(noop1),Quoted(noop2),Quoted(zap))) == Program.empty)
+  }
+  test("k and R combinators") {
+    assert(Program(Quoted(noop1),Quoted(zap),k).eval() == Program(zap))
+    assert(Program(k).eval() == Program(k))
+    assert(Program(R).eval() == Program(R))
+  }
+  test("cons") {
+    assert(Program(Quoted(zap),Quoted(i), cons).eval() == Program(Quoted(Quoted(zap),i)))
+    assert(Program(cons).eval(Program(Quoted(noop1),Quoted(noop2))) == Program(Quoted(Quoted(noop1),noop2)))
+  }
+  test("sap") {
+    assert(Program(Quoted(noop1),Quoted(noop2),Quoted(noop3),Quoted(zap),Quoted(i),sap).eval() == Program(Quoted(noop1)))
+  }
+  test("unit") {
+    assert(Program(Quoted(zap),unit).eval() == Program(Quoted(Quoted(zap))))
+  }
+  test("run") {
+    assert(Program(Quoted(noop1),Quoted(noop2),Quoted(zap),ZeroOne.run).eval() == Program(Quoted(noop1),Quoted(zap)))
+  }
+}
+
+
+/*
 class ParseSuite extends FunSuite {
   implicit val testMapping = ZeroOne.SymbolMaps.defaultMapping
   test("parse empty program") {
@@ -97,3 +145,4 @@ class EvalSuite extends FunSuite {
 class DebugSuite extends FunSuite {
   // a debug combinator? "... [E] [D] [C] [... H] [A B ...] step == ... [E] [D] [C] A [... H A] [B ...]"
 }
+*/

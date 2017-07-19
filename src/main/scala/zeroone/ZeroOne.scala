@@ -6,201 +6,163 @@ import scala.language.implicitConversions
 sealed trait ZeroOne {
   override def toString = this match {
     case ZeroOne.Program(elems) => elems.mkString(" ")
-    case ZeroOne.Quoted(prog) => "[" + prog + "]"
-    case ZeroOne.StackEffect(action, name) => if(name.nonEmpty) name else action.toString
-    case ZeroOne.Data.Input(elems) => elems.mkString(" ")
-    case ZeroOne.Data.Output(elems) => elems.reverse.mkString(" ") //makes for easier reading of program output
+    case ZeroOne.Quoted(ZeroOne.Program(elems)) => elems.mkString("["," ","]")
+    case effect: ZeroOne.StackEffect => if(effect.name.nonEmpty) effect.name else effect.action.toString
   }
 }
 object ZeroOne {
-
   final case class Program(elems: List[ZeroOne]) extends ZeroOne
-  object Program {
-    def empty = Program(List.empty[ZeroOne])
-    def apply(elems: ZeroOne*): Program = Program(elems.toList)
+  object Program{
+    def empty: Program = Program(List.empty)
+    def apply(elems: ZeroOne*): Program = {
+      //Program(elems.toList)
+      val list = elems.map {
+        case Program(es) => es
+        case Quoted(p) => List(Quoted(p))
+        case StackEffect(action,name) => List(StackEffect(action,name))
+      }.toList.flatten
+      Program(list)
+    }
   }
 
   final case class Quoted(program: Program) extends ZeroOne
   object Quoted {
-    def empty = Quoted(Program.empty)
     def apply(elems: ZeroOne*): Quoted = Quoted(Program(elems.toList))
   }
-  sealed trait Data extends ZeroOne {
-    val elems: List[Quoted]
-    override def equals(o: Any) = o match {case d: Data => d.elems == elems; case _ => false}
-  }
-  object Data {
-    final case class Input(elems: List[Quoted]) extends Data
-              object Input {
-                implicit def output2input(output: Output): Input = Input(output.elems)
-                def empty: Input = Input(List.empty[Quoted])
-                def apply(elems: Quoted*): Input = Input(elems.toList)
-              }
-    final case class Output(elems: List[Quoted]) extends Data
-              object Output {
-                implicit def input2output(input: Input): Output = Output(input.elems)
-                def empty: Output = Output(List.empty[Quoted])
-                def apply(elems: Quoted*): Output = Output(elems.toList)
-              }
-    def empty: Input = Input(List.empty[Quoted])
-    def apply(elems: Quoted*): Input = Input(elems.toList)
+
+  final case class StackEffect(action: Program => Program, name: String) extends ZeroOne
+  object StackEffect{
+    def apply(name: String)(action: Program => Program):StackEffect = new StackEffect(action,name)
   }
 
-  final case class StackEffect(action: Data => Either[String,Data], name: String = "") extends ZeroOne
-            object StackEffect {
-              def apply(name: String)(action: Data => Either[String,Data]):StackEffect = new StackEffect(action,name)
-            }
-
-  // some implicit conversions to make our lives easier
-  implicit def tryToEitherStringT[T](t: Try[T]): Either[String,T] = t match {case Success(r) => Right(r); case Failure(e) => Left(e.getMessage)}
-  implicit def eitherStringTtoTry[T](either: Either[String,T]): Try[T] = either match { case Right(v) => Success(v); case Left(s) => Failure(new RuntimeException(s))}
-
-
-  // these combinators nothing "no operation" -- helpful for testing though
-  val NOOP1: StackEffect = StackEffect((input) => Right(input), "NOOP1")
-  val NOOP2: StackEffect = StackEffect((input) => Right(input), "NOOP2")
-  val NOOP3: StackEffect = StackEffect((input) => Right(input), "NOOP3")
-  val NOOP4: StackEffect = StackEffect((input) => Right(input), "NOOP4")
-  val NOOP5: StackEffect = StackEffect((input) => Right(input), "NOOP5")
-  val NOOP6: StackEffect = StackEffect((input) => Right(input), "NOOP6")
-
-  // the empty quotation, as a combinator
-  val nil: StackEffect = StackEffect((input) => Right(Data.Output(Quoted.empty :: input.elems)), "OP_NIL")
-
-  val zap: StackEffect = StackEffect((input) => Try(input.elems.tail) match {case Success(r) => Right(Data.Output(r)); case Failure(e) => Left(e.getMessage)}, "OP_ZAP")
-
-  val swap: StackEffect = {
-    val action: Data => Either[String,Data] = input => {
-      val result = for(
-        a <- Try(input.elems.head);
-        b <- Try(input.elems.drop(1).head)
-      ) yield Data.Output(b :: a :: input.elems.drop(1).tail)
-      result match {
-        case Success(r) => Right(r)
-        case Failure(e) => Left(e.getMessage)
-      }
-    }
-    StackEffect(action, "OP_SWAP")
-  }
-
-  val cons: StackEffect = {
-    val action: Data => Either[String,Data] = input => {
-      (for( a <- Try(input.elems.head.program);
-           b <- Try(input.elems.drop(1).head.program)
-      ) yield Data.Output(Quoted(Program(Quoted(b) :: a.elems)) :: input.elems.drop(1).tail)) match {
-        case Success(r) => Right(r)
-        case Failure(e) => Left(e.getMessage)
-      }
-    }
-    StackEffect(action, "OP_CONS")
-  }
   import eval._
 
-  val i = StackEffect("OP_I"){
-    input => Try(input.elems.head.program).flatMap(_.eval(Data.Input(input.elems.drop(1))))
-  }
+  val noop1: StackEffect = StackEffect("noop1") {input => input}
+  val noop2: StackEffect = StackEffect("noop2") {input => input}
+  val noop3: StackEffect = StackEffect("noop3") {input => input}
+  val noop4: StackEffect = StackEffect("noop4") {input => input}
+  val noop5: StackEffect = StackEffect("noop5") {input => input}
 
-
-  val sap: StackEffect = {
-    val action: Data => Either[String, Data] = input => {
-      for( a <- Try(input.elems.head.program);
-           b <- Try(input.elems.drop(1).head.program);
-          result <- a.eval(Data.Input(input.elems.drop(2))).flatMap(b.eval(_))
-      ) yield result
+  val zap: StackEffect = StackEffect("zap") {input =>
+    input.elems.reverse.headOption match {
+      case Some(Quoted(a)) => Program(input.elems.reverse.tail.reverse)
+      case _ => Program(input.elems :+ zap)
     }
-    StackEffect(action, "OP_SAP")
+  }
+  val nil: StackEffect = StackEffect("nil") { input =>
+    Program(input.elems :+ Quoted(Program.empty))
+  }
+  val i: StackEffect = StackEffect("i") { input =>
+    input.elems.reverse.headOption match {
+      case Some(Quoted(a)) => a.eval(Program(input.elems.reverse.tail.reverse))
+      case _ => Program(input.elems :+ i)
+    }
+  }
+  val k: StackEffect = StackEffect("k"){ input =>
+    val stack = input.elems.reverse
+    (stack.headOption, stack.drop(1).headOption) match {
+      case (Some(Quoted(a)),Some(Quoted(b))) => a.eval(Program(stack.drop(2).reverse))
+      case _ => Program(stack :+ k)
+    }
   }
 
-  val k: StackEffect = StackEffect(
-    (input) => input.elems.headOption match {
-    case Some(q) => q.program.eval(Data.Input(input.elems.drop(2)))
-    case None => Left("stack underflow when trying to evaluate k combinator")
-  }, "OP_K")
+  val z: StackEffect = StackEffect("z"){ input =>
+    val stack = input.elems.reverse
+    (stack.headOption, stack.drop(1).headOption) match {
+      case (Some(Quoted(a)),Some(Quoted(b))) => b.eval(Program(stack.drop(2).reverse))
+      case _ => Program(stack :+ z)
+    }
+  }
 
-  val R: StackEffect = StackEffect(k.action, "OP_R") //R is just a synonym for k
-
-  val z: StackEffect = StackEffect(
-    (input) => input.elems.drop(1).headOption match {
-      case Some(q) => q.program.eval(Data.Input(input.elems.drop(2)))
-      case None => Left("stack underflow when trying to evaluate z combinator")
-    }, "OP_Z")
-
-  val L: StackEffect = StackEffect(z.action, "OP_L") //L is just a synonym for z
-
-  //some sample symbol mappings
-  object SymbolMaps {
-    val emptyMapping: Map[Char,Program] = Map.empty
-    val defaultMapping: Map[Char,Program] = Map(
-      '1' -> Program(R),
-      '0' -> Program(Quoted(
-                        Quoted(
-                          Quoted(cons),
-                          Quoted(sap)
-                        ),
-                        Quoted(
-                          Quoted(nil),
-                          Quoted(swap)
-                        )), Quoted(L))
-    )
+  val R: StackEffect = StackEffect("R"){ input =>
+    //R is a synonym for k
+    val stack = input.elems.reverse
+    (stack.headOption, stack.drop(1).headOption) match {
+      case (Some(Quoted(a)),Some(Quoted(b))) => a.eval(Program(stack.drop(2).reverse))
+      case _ => Program(stack :+ R)
+    }
+  }
+  val L: StackEffect = StackEffect("L"){ input =>
+    //L is a synonym for z
+    val stack = input.elems.reverse
+    (stack.headOption, stack.drop(1).headOption) match {
+      case (Some(Quoted(a)),Some(Quoted(b))) => b.eval(Program(stack.drop(2).reverse))
+      case _ => Program(stack :+ L)
+    }
+  }
+  val cons: StackEffect = StackEffect("cons") { input =>
+    //[B] [A] cons == [[B] A]
+    val stack = input.elems.reverse
+    (stack.headOption, stack.drop(1).headOption) match {
+      case (Some(Quoted(a)),Some(Quoted(b))) => Quoted(Program(Quoted(b) :: a.elems)).eval(Program(stack.drop(2).reverse))
+      case _ => Program(stack :+ cons)
+    }
+  }
+  val sap: StackEffect = StackEffect("sap") { input =>
+    //[B] [A] sap == A B
+    val stack = input.elems.reverse
+    (stack.drop(1).headOption, stack.headOption) match {
+      case (Some(Quoted(b)), Some(Quoted(a))) => b.eval(a.eval(Program(stack.drop(2).reverse)))
+      case _ => Program(stack :+ sap)
+    }
+  }
+  val unit: StackEffect = StackEffect("unit") { input =>
+    val stack = input.elems.reverse
+    stack.headOption match {
+      case Some(Quoted(a)) => Quoted(Quoted(a)).eval(Program(stack.tail.reverse))
+      case _ => Program(stack :+ unit)
+    }
+  }
+  val run: StackEffect = StackEffect("run") { input =>
+    val stack = input.elems.reverse
+    stack.headOption match {
+      case Some(Quoted(a)) => Program(a.eval(Program(stack.tail.reverse)).elems :+ Quoted(a))
+      case _ => Program(stack :+ run)
+    }
+  }
+  def rep(num: Int): StackEffect = StackEffect(s"rep$num") { input =>
+    // rep0 == zap, rep1 == i, rep2 = run i, rep3 = run run i
+    num match {
+      case 0 => zap.eval(Program(input.elems.reverse))
+      case 1 => i.eval(Program(input.elems.reverse))
+      case n: Int if n > 1 => Program((1 until n).map(_ => run).toList :+ i).eval(Program(input.elems.reverse))
+    }
+  }
+  val b: StackEffect = StackEffect("b") { input =>
+    // [C] [B] [A] b == [[C] B] A
+    val stack = input.elems.reverse
+    (stack.drop(2).headOption, stack.drop(1).headOption, stack.headOption) match {
+      case (Some(Quoted(pC)),Some(Quoted(pB)),Some(Quoted(pA))) => Program(Quoted(Program(Quoted(pC)::pB.elems))::pA.elems).eval(Program(stack.drop(3).reverse))
+      case _ => Program(stack :+ b)
+    }
+  }
+  val s: StackEffect = StackEffect("s") { input =>
+    // [C] [B] [A] s == [[C] B] [C] A
+    val stack = input.elems.reverse
+    (stack.drop(2).headOption, stack.drop(1).headOption, stack.headOption) match {
+      case (Some(Quoted(pC)),Some(Quoted(pB)),Some(Quoted(pA))) =>
+        Program(Quoted(Program(Quoted(pC)::pB.elems))::Quoted(pC)::pA.elems).eval(Program(stack.drop(3).reverse))
+      case _ => Program(stack :+ s)
+    }
   }
 }
 
 object eval {
   import ZeroOne._
-
-  implicit class ImplZeroOneAsData(stack: List[ZeroOne]) {
-    def asData: Try[Data.Input] = stack.forall(_.isInstanceOf[Quoted]) match {
-      case true => Success(Data.Input(stack.map(_.asInstanceOf[Quoted])))
-      case false => Failure( new Exception("unable to convert stack to data!"))
-    }
-  }
-
-  implicit class ImplEvals(p: ZeroOne) {
-    def eval(inputStack: Data = Data.empty): Either[String,Data] = p match {
-      case Program(elems) => elems.foldLeft(Right(inputStack).asInstanceOf[Either[String,Data]]) {  //eval child elements
-        case (Right(stack), elem) => elem.eval(stack)
-        case (Left(error), elem) => Left(error + elem.toString) //propagate the error
+  implicit class ImplInterpreter(elem: ZeroOne) {
+    def eval(input: Program = Program.empty): Program = elem match {
+      case q: Quoted =>
+        //println(s"quote $input | $q")
+        Program(input.elems :+ q)
+      case e: StackEffect =>
+        //println(s" effect $input | $e")
+        e.action(input)
+      case p: Program => p.elems.foldLeft(input) {
+        case(inputProg, element) =>
+          println(s"$inputProg | $element")
+          element.eval(inputProg)
       }
-      case quotedProg: Quoted => Right(Data.Output(quotedProg :: inputStack.elems)) //just push quote onto the stack
-      case StackEffect(action,_) => action(inputStack) //pass the stack to the action thereby evaluating it
-      case Data.Input(elems) => Right(Data.Output(elems ++ inputStack.elems))//elems.foldLeft(inputStack) {case (stack, elem) => elem.eval(stack)}
-      case Data.Output(elems) => Right(Data.Output(elems ++ inputStack.elems)) //elems.foldLeft(inputStack) {case (stack, elem) => elem.eval(stack)}
     }
-  }
-
-  implicit class ImplProgramOps(p: Program) {
-    def simplify: Program = Program(eval.simplify(p.elems))
-  }
-  def simplify(elems: List[ZeroOne]): List[ZeroOne] = {
-    println(s"simplifying program $elems")
-    elems.foldLeft((List.empty[ZeroOne],elems)) {
-      case ((stack,continuation), elem: Quoted) =>
-        println(s" adding quoted item $elem to stack")
-        (elem :: stack, continuation.drop(1))
-      case ((stack, continuation), elem: Program) =>
-        println(s" simplifying sub program $elem")
-        (simplify((elem.elems.reverse ++ stack).reverse), continuation.drop(1))
-      case ((stack, continuation), elem: StackEffect) => {
-        println(s" simplifying $elem")
-        val data = stack.asData
-        println(s" stack is $stack, data is $data")
-        data.map(d => elem.action(d)) match {
-          case Success(Right(output)) =>
-            println("success rewriting $elem")
-            //Program(output.elems.reverse)
-            (output.elems, continuation.drop(1))
-          case Success(Left(msg)) =>
-            println(s"Left($msg)")
-            (continuation.drop(1)++(elem :: stack), continuation.drop(1))
-          case _ =>
-            println("failed, so returning stack so far plus program")
-            (continuation.drop(1)++(elem :: stack), continuation.drop(1))
-        }
-      }
-      case ((stack,continuation),_) =>
-        println("OTHER")
-        (stack,continuation.drop(1))
-    }._1.reverse
   }
 
 }

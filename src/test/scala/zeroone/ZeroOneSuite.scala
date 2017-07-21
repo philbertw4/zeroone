@@ -1,8 +1,47 @@
 package zeroone
 
-import org.scalatest.FunSuite
+import org.scalatest.{FunSuite, Matchers}
 import ZeroOne._
+import cats.instances.all._
+import cats.kernel.Eq
+import cats.kernel.laws.GroupLaws
+import cats.laws.discipline._
+import org.scalacheck.{Arbitrary, Gen}
+import org.typelevel.discipline.scalatest.Discipline
 
+class ZeroOneExamples extends FunSuite {
+  import StackEffect._
+  test("dup example1") {
+    assert((Quoted(noop(1)) + dup) == Program(Quoted(noop(1)),Quoted(noop(1))))
+  }
+  test("dup example2") {
+    assert((Quoted(noop(1)) + Quoted(noop(2)) + dup) == Program(Quoted(noop(1)),Quoted(noop(2)),Quoted(noop(2))))
+  }
+  test("nil") {
+    assert((Quoted(noop(1)) + nil) == Program(Quoted(noop(1)),Quoted.empty))
+  }
+  test("unit") {
+    assert((Quoted(noop(1)) + unit) == Program(Quoted(Quoted(noop(1)))))
+  }
+}
+
+class ZeroOneMonoidSpec extends FunSuite with Matchers with Discipline {
+  checkAll("Monoid[ZeroOne]", GroupLaws[ZeroOne].monoid)
+}
+
+/*class MonoidSuite extends FunSuite {
+  test("empty program is id element") {
+    assert((Program.empty + Program.empty) == Program.empty)
+  }
+  test("quoted program is pushed on to stack") {
+    assert((Quoted.empty + Program.empty) == Program(Quoted.empty))
+  }
+  test("concat is associative") {
+    assert((Quoted(Program.empty) + Program.empty + Quoted(StackEffect.noop1)) == (Program(Quoted(Program.empty)::Quoted(Program(StackEffect.noop1::Nil))::Nil)))
+  }
+}*/
+
+/*
 class EvalSuite extends FunSuite {
   import eval._
   test("eval empty program should not change stack") {
@@ -48,7 +87,7 @@ class EvalSuite extends FunSuite {
     assert(Program(Quoted(noop1),Quoted(noop2),Quoted(zap),ZeroOne.run).eval() == Program(Quoted(noop1),Quoted(zap)))
   }
 }
-
+*/
 
 /*
 class ParseSuite extends FunSuite {

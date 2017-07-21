@@ -1,182 +1,182 @@
 package zeroone
 
-import scala.util.{Try,Success,Failure}
+import scala.util.{Failure, Success, Try}
 import scala.language.implicitConversions
+import cats.Monoid
+import cats.kernel.Eq
+import org.scalacheck.{Arbitrary, Gen}
 
 sealed trait ZeroOne {
   override def toString = this match {
-    case ZeroOne.Program(elems) => elems.mkString(" ")
+    case ZeroOne.Program(elems) => elems.mkString("'"," ","'")
     case ZeroOne.Quoted(ZeroOne.Program(elems)) => elems.mkString("["," ","]")
     case effect: ZeroOne.StackEffect => if(effect.name.nonEmpty) effect.name else effect.action.toString
   }
 }
 object ZeroOne {
   final case class Program(elems: List[ZeroOne]) extends ZeroOne
-  object Program{
+  object Program {
     def empty: Program = Program(List.empty)
-    def apply(elems: ZeroOne*): Program = {
-      //Program(elems.toList)
-      val list = elems.map {
-        case Program(es) => es
-        case Quoted(p) => List(Quoted(p))
-        case StackEffect(action,name) => List(StackEffect(action,name))
-      }.toList.flatten
-      Program(list)
-    }
+    def apply(elems: ZeroOne*): Program = Program(elems.toList)
   }
 
   final case class Quoted(program: Program) extends ZeroOne
   object Quoted {
+    def empty: Quoted = Quoted(Program.empty)
     def apply(elems: ZeroOne*): Quoted = Quoted(Program(elems.toList))
   }
 
-  final case class StackEffect(action: Program => Program, name: String) extends ZeroOne
-  object StackEffect{
-    def apply(name: String)(action: Program => Program):StackEffect = new StackEffect(action,name)
-  }
+  final case class StackEffect(action: ZeroOne => ZeroOne, name: String) extends ZeroOne
+  object StackEffect {
+    def empty: StackEffect = StackEffect((input) => input, "Noop")
+    def apply(name: String)(action: ZeroOne => ZeroOne):StackEffect = StackEffect(action,name)
 
-  import eval._
 
-  val noop1: StackEffect = StackEffect("noop1") {input => input}
-  val noop2: StackEffect = StackEffect("noop2") {input => input}
-  val noop3: StackEffect = StackEffect("noop3") {input => input}
-  val noop4: StackEffect = StackEffect("noop4") {input => input}
-  val noop5: StackEffect = StackEffect("noop5") {input => input}
+    val noop1: StackEffect = StackEffect("noop1"){
+      input => input
+        /*case q: Quoted => Program(q)
+        case e: StackEffect => Program(e)
+        case p: Program => p*/
+    }
+    def noop(num: Int): StackEffect = StackEffect(s"noop$num")(noop1.action)
 
-  val zap: StackEffect = StackEffect("zap") {input =>
-    input.elems.reverse.headOption match {
-      case Some(Quoted(a)) => Program(input.elems.reverse.tail.reverse)
-      case _ => Program(input.elems :+ zap)
+    val nil: StackEffect = StackEffect("nil") {
+      // nil == []
+      input => input + Quoted.empty //in all cases just push an empty quotation
+      /*case q: Quoted => q + Quoted.empty
+      case e: StackEffect => Program(e,) Quoted.empty)
+      case p: Program => Program(p.elems :+ Quoted.empty)*/
     }
-  }
-  val nil: StackEffect = StackEffect("nil") { input =>
-    Program(input.elems :+ Quoted(Program.empty))
-  }
-  val i: StackEffect = StackEffect("i") { input =>
-    input.elems.reverse.headOption match {
-      case Some(Quoted(a)) => a.eval(Program(input.elems.reverse.tail.reverse))
-      case _ => Program(input.elems :+ i)
-    }
-  }
-  val k: StackEffect = StackEffect("k"){ input =>
-    val stack = input.elems.reverse
-    (stack.headOption, stack.drop(1).headOption) match {
-      case (Some(Quoted(a)),Some(Quoted(b))) => a.eval(Program(stack.drop(2).reverse))
-      case _ => Program(stack :+ k)
-    }
-  }
-
-  val z: StackEffect = StackEffect("z"){ input =>
-    val stack = input.elems.reverse
-    (stack.headOption, stack.drop(1).headOption) match {
-      case (Some(Quoted(a)),Some(Quoted(b))) => b.eval(Program(stack.drop(2).reverse))
-      case _ => Program(stack :+ z)
-    }
-  }
-
-  val R: StackEffect = StackEffect("R"){ input =>
-    //R is a synonym for k
-    val stack = input.elems.reverse
-    (stack.headOption, stack.drop(1).headOption) match {
-      case (Some(Quoted(a)),Some(Quoted(b))) => a.eval(Program(stack.drop(2).reverse))
-      case _ => Program(stack :+ R)
-    }
-  }
-  val L: StackEffect = StackEffect("L"){ input =>
-    //L is a synonym for z
-    val stack = input.elems.reverse
-    (stack.headOption, stack.drop(1).headOption) match {
-      case (Some(Quoted(a)),Some(Quoted(b))) => b.eval(Program(stack.drop(2).reverse))
-      case _ => Program(stack :+ L)
-    }
-  }
-  val cons: StackEffect = StackEffect("cons") { input =>
-    //[B] [A] cons == [[B] A]
-    val stack = input.elems.reverse
-    (stack.headOption, stack.drop(1).headOption) match {
-      case (Some(Quoted(a)),Some(Quoted(b))) => Quoted(Program(Quoted(b) :: a.elems)).eval(Program(stack.drop(2).reverse))
-      case _ => Program(stack :+ cons)
-    }
-  }
-  val sap: StackEffect = StackEffect("sap") { input =>
-    //[B] [A] sap == A B
-    val stack = input.elems.reverse
-    (stack.drop(1).headOption, stack.headOption) match {
-      case (Some(Quoted(b)), Some(Quoted(a))) => b.eval(a.eval(Program(stack.drop(2).reverse)))
-      case _ => Program(stack :+ sap)
-    }
-  }
-  val unit: StackEffect = StackEffect("unit") { input =>
-    val stack = input.elems.reverse
-    stack.headOption match {
-      case Some(Quoted(a)) => Quoted(Quoted(a)).eval(Program(stack.tail.reverse))
-      case _ => Program(stack :+ unit)
-    }
-  }
-  val run: StackEffect = StackEffect("run") { input =>
-    val stack = input.elems.reverse
-    stack.headOption match {
-      case Some(Quoted(a)) => Program(a.eval(Program(stack.tail.reverse)).elems :+ Quoted(a))
-      case _ => Program(stack :+ run)
-    }
-  }
-  def rep(num: Int): StackEffect = StackEffect(s"rep$num") { input =>
-    // rep0 == zap, rep1 == i, rep2 = run i, rep3 = run run i
-    num match {
-      case 0 => zap.eval(Program(input.elems.reverse))
-      case 1 => i.eval(Program(input.elems.reverse))
-      case n: Int if n > 1 => Program((1 until n).map(_ => run).toList :+ i).eval(Program(input.elems.reverse))
-    }
-  }
-  val b: StackEffect = StackEffect("b") { input =>
-    // [C] [B] [A] b == [[C] B] A
-    val stack = input.elems.reverse
-    (stack.drop(2).headOption, stack.drop(1).headOption, stack.headOption) match {
-      case (Some(Quoted(pC)),Some(Quoted(pB)),Some(Quoted(pA))) => Program(Quoted(Program(Quoted(pC)::pB.elems))::pA.elems).eval(Program(stack.drop(3).reverse))
-      case _ => Program(stack :+ b)
-    }
-  }
-  val s: StackEffect = StackEffect("s") { input =>
-    // [C] [B] [A] s == [[C] B] [C] A
-    val stack = input.elems.reverse
-    (stack.drop(2).headOption, stack.drop(1).headOption, stack.headOption) match {
-      case (Some(Quoted(pC)),Some(Quoted(pB)),Some(Quoted(pA))) =>
-        Program(Quoted(Program(Quoted(pC)::pB.elems))::Quoted(pC)::pA.elems).eval(Program(stack.drop(3).reverse))
-      case _ => Program(stack :+ s)
-    }
-  }
-}
-
-object eval {
-  import ZeroOne._
-  implicit class ImplInterpreter(elem: ZeroOne) {
-    def eval(input: Program = Program.empty): Program = elem match {
-      case q: Quoted =>
-        //println(s"quote $input | $q")
-        Program(input.elems :+ q)
-      case e: StackEffect =>
-        //println(s" effect $input | $e")
-        e.action(input)
-      case p: Program => p.elems.foldLeft(input) {
-        case(inputProg, element) =>
-          println(s"$inputProg | $element")
-          element.eval(inputProg)
+    val zap: StackEffect = StackEffect("zap") {
+      // [A] zap == ''
+      case q: Quoted => Program.empty
+      case e: StackEffect => Program(e,zap)
+      case p: Program => p.elems.lastOption.map(_.isInstanceOf[Quoted]) match {
+        case Some(true) => Program(p.elems.dropRight(1))
+        case _ => Program(p.elems :+ zap)
       }
     }
+    val i: StackEffect = StackEffect("i") {
+      // [A] i == A
+      case q: Quoted => q.program
+      case e: StackEffect => Program(e, i)
+      case p: Program => p.elems.lastOption match {
+        case Some(Quoted(a)) => Program(p.elems.dropRight(1)) + a
+        case _ => Program(p.elems :+ i)
+      }
+    }
+
+    val k: StackEffect = StackEffect("k") {
+      // [B] [A] k == A
+      case q: Quoted => Program(q,k)
+      case e: StackEffect => Program(e,k)
+      case p: Program => (p.elems.dropRight(1).lastOption, p.elems.lastOption) match {
+        case (Some(Quoted(b)), Some(Quoted(a))) => Program(p.elems.dropRight(2)) + a
+        case _ => Program(p.elems :+ k)
+      }
+    }
+    val z: StackEffect = StackEffect("k") {
+      // [B] [A] z == B
+      case q: Quoted => Program(q,z)
+      case e: StackEffect => Program(e, z)
+      case p: Program => (p.elems.dropRight(1).lastOption, p.elems.lastOption) match {
+        case (Some(Quoted(b)), Some(Quoted(a))) => Program(p.elems.dropRight(2)) + b
+        case _ => Program(p.elems :+ z)
+      }
+    }
+    val cake: StackEffect = StackEffect("cake") {
+      // [B] [A] cake == [[B] A] [A [B]]
+      case q: Quoted => Program(q) + Program(cake)
+      case e: StackEffect => Program(e) + Program(cake)
+      case p: Program => (p.elems.dropRight(1).lastOption, p.elems.lastOption) match {
+        case (Some(Quoted(b)), Some(Quoted(a))) => Program(p.elems.dropRight(2)) + Quoted( Program(Quoted(b) :: a.elems) ) + Quoted( Program(a.elems :+ Quoted(b)) )
+        case _ => Program(p.elems :+ cake)
+      }
+    }
+    lazy val dip: ZeroOne = cake + k
+    lazy val cons: ZeroOne = cake + nil + k
+    lazy val dup: ZeroOne = nil + cake + dip + dip
+    lazy val unit: ZeroOne = nil + cons
   }
 
-}
+  implicit val zeroOneMonoid: Monoid[ZeroOne] = new Monoid[ZeroOne] {
+    def empty: ZeroOne = Program.empty
+    def combine(b: ZeroOne, a:ZeroOne): ZeroOne = {
+        val res = (b, a) match {
+          case (b: Quoted, a: Quoted) => Program(b, a)
+          case (b: Quoted, Program(elems)) => combine(Program(b), Program(elems)) //Program(b :: elems)
+          case (b: Quoted, StackEffect(action, name)) =>  action(b)
 
-object parse {
-  import ZeroOne._
-  def apply(raw: String)(implicit symbolMapping: Map[Char,Program]): Program = raw.map(c=>symbolMapping.get(c)).foldLeft(Program.empty){
-    case (Program(elems), Some(p)) => Program(elems ++ p.elems)
-    case (Program(elems), _) => Program(elems) //unknown character so ignore and move on
+          case (b: StackEffect, a: StackEffect) => Program.empty + Program(b, a)
+          case (b: StackEffect, a: Program) => combine(Program(b), a) //Program(b :: a.elems)
+          case (b: StackEffect, a: Quoted) =>  Program(b, a)
+
+          case (b: Program, a: Quoted) => if(b == Program.empty) Program(a) else Program(b.elems :+ a)
+          case (b: Program, a: StackEffect) => a.action(b)
+          case (b: Program, a: Program) => (b.elems ++ a.elems).foldLeft(empty) {
+            case (stack, elem) =>
+              if (elem == Program.empty)
+                stack
+              else
+                combine(stack, elem)
+          }
+        }
+      println(s"combined ($b, $a) ---->  $res")
+      res
+    }
   }
-}
 
-object Implicits {
-  implicit class StrAsProgram(s: String) {
-    def parse(implicit symbolMapping: Map[Char,ZeroOne.Program]): ZeroOne.Program = zeroone.parse(s) //let's allow any string to be parsed as a program
+  implicit val eqZeroOne: Eq[ZeroOne] = new Eq[ZeroOne] {
+    def eqv(x: ZeroOne, y: ZeroOne): Boolean = (x, y) match {
+      case (p: Program, q: Program) => (Program.empty + p) == (Program.empty + q)
+      case (p: Program, Quoted(a)) => eqv(p,Program(Quoted(a)))
+      case (p: Program, e: StackEffect) => eqv(p,Program(e))
+      case (q: Quoted, p: Program) => eqv(p,q)
+      case (Quoted(a), Quoted(b)) => eqv(a,b)
+      case (q: Quoted, p: StackEffect) => false
+      case (e: StackEffect, e2: StackEffect) => e.action == e2.action && e.name == e2.name
+      case (e: StackEffect, q: Quoted) => false
+      case (e: StackEffect, p: Program) => eqv(p,e)
+    }
+  }
+
+  implicit class concatZeroOneImpl(b: ZeroOne) {
+    def +(a: ZeroOne): ZeroOne = Monoid.combine(b, a)
+    def apply(a: ZeroOne): ZeroOne = Monoid.combine(b,a)
+  }
+
+  implicit def arbZeroOne: Arbitrary[ZeroOne] = {
+    import StackEffect._
+    val effects = Gen.oneOf(
+      Gen.const(nil),
+      Gen.const(noop1),
+      Gen.const(zap),
+      Gen.const(i),
+      Gen.const(k),
+      Gen.const(Program.empty),
+      Gen.const(cake),
+      Gen.const(cons),
+      //Gen.const(dup),
+      //Gen.const(unit),
+      Gen.const(dip)
+    )
+
+    val programs = Gen.listOfN(3,effects).map{l =>
+      Program(l.foldLeft(List.empty[ZeroOne]){
+        case (accum, elem: Program) => accum ++ elem.elems
+        case (accum, elem: ZeroOne) => accum :+ elem
+      })
+    }
+
+    val quotes = programs.map(Quoted(_))
+
+    val stack = Gen.listOfN(2,quotes).map(Program(_))
+
+    val combined = stack.flatMap(s => programs.map(p => Program(s.elems ++ p.elems)))
+    Arbitrary(
+      //programs
+      //combined
+      Gen.oneOf(effects, combined)
+    )
   }
 }

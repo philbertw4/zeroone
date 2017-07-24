@@ -23,6 +23,48 @@ class ZeroOneExamples extends FunSuite {
   test("unit") {
     assert((Quoted(noop(1)) + unit) == Program(Quoted(Quoted(noop(1)))))
   }
+  test("sap") {
+    assert((Quoted(noop1) + Quoted(zap) + nil + sap) == Program.empty)
+    assert((Quoted(noop1) + Quoted(noop(2)) + Quoted(zap) + Quoted(noop(3)) + sap) == Program(Quoted(noop1)))
+  }
+  test("[[cons] [sap]] [z] k == z") {
+    assert((Quoted(Quoted(cons),Quoted(sap)) + Quoted(z) + k) == Program(z))
+  }
+  test("counting numbers") {
+    assert( (nil + nil + z(0)) == Program.empty)
+    assert( (nil + nil + z(1)) == Program(Quoted.empty))
+    assert( (nil + nil + z(2)) == Program(Quoted(Quoted.empty)))
+  }
+  test("plus") {
+    assert( (Quoted(z(1)) + Quoted(z(1)) + plus) == Program.empty + z(2))
+  }
+}
+
+class ZeroOneSymbolMappingSuite extends FunSuite {
+  import StackEffect._
+  val zero = Quoted(Quoted(Quoted(cons),Quoted(nil)),Quoted(Quoted(sap),Quoted(dup))) + Quoted(z)
+  val one = k
+  test("0 == [[[cons] [nil]] [[sap] [dup]]] [z]") {
+    assert( zero == Quoted(Quoted(Quoted(cons),Quoted(nil)),Quoted(Quoted(sap),Quoted(dup))) + Quoted(z) )
+  }
+  test("1 == k") {
+    assert( one == k)
+  }
+  test("01 == z") {
+    assert( (zero + one) == Program(z) )
+  }
+  test("0 01 == [[cons] [nil]] [[sap] [dup]]") {
+    assert( (zero + zero + one) == (Quoted(Quoted(cons),Quoted(nil)) + Quoted(Quoted(sap),Quoted(dup))) )
+  }
+  test("0 01 01 == [cons] [nil]") {
+    assert( (zero + zero + one + zero + one) == (Quoted(cons) + Quoted(nil)) )
+  }
+  test("0 01 01 01 == cons") {
+    assert((zero + zero + one + zero + one + zero + one) == cons )
+  }
+  test("0 01 01 1 == nil") {
+    assert((zero + zero + one + zero + one + one) == (nil + Program.empty))
+  }
 }
 
 class ZeroOneMonoidSpec extends FunSuite with Matchers with Discipline {
